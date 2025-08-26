@@ -338,15 +338,6 @@
                             </div>
 
                             <!-- Sezione input -->
-<!-- Stato tassi / fonte -->
-                            <div class="tassi-header" style="display:flex; align-items:center; gap:12px; margin: 8px 0 4px 0;">
-                                <div>
-                                    <div id="badge-tassi" style="font-size:0.95rem; color:#636e72;">Indice base: caricamento…</div>
-                                    <div id="note-tassi" style="font-size:0.85rem; color:#b33939;"></div>
-                                </div>
-                                <button type="button" class="btn-calcola" id="btnRefreshTassi" title="Ricarica tassi">Aggiorna tassi</button>
-                            </div>
-
                             <div class="input-section">
                                 <!-- Importo Fido -->
                                 <div class="form-group">
@@ -608,8 +599,8 @@
     // Commissione: 0,2% per trimestre se fido > 8.000€ (max 500€) pro rata
     //              0,4% per trimestre se fido <= 8.000€ (max 20€) pro rata
 
-    let euriborBase = 2.714;   // fisso
-    let extraFisso = 0.997;    // fisso
+    const euriborBase = 2.714;   // fisso
+    const extraFisso = 0.997;    // fisso
     // Mappa fasce (patrimonio) -> spread (valori di esempio, personalizza se vuoi replicare i tuoi)
     const fascePatrimonio = [
         {min: 5000, max: 20000, spread: 6.7},
@@ -621,89 +612,6 @@
         {min: 1000000.01, max: 2000000, spread: 2.2},
         {min: 2000000.01, max: Infinity, spread: 1.7}
     ];
-    // ====== INIZIO: Caricamento indice base + badge ======
-    const TASSI_META = { fonte: 'ECB €STR 3M compounded', ultimoAggiornamento: null };
-
-    async function caricaTassoUfficiale() {
-        // 1) Tenta endpoint server-side (consigliato): /api/tassi-ecb?tenor=3m
-        try {
-            const res = await fetch('/api/tassi-ecb?tenor=3m', { cache: 'no-store' });
-            if (res.ok) {
-                const j = await res.json();
-                const val = Number(j.value ?? j.euribor ?? j.rate);
-                if (!Number.isNaN(val)) {
-                    euriborBase = val;
-                    TASSI_META.fonte = j.source || 'ECB via server';
-                    TASSI_META.ultimoAggiornamento = j.date || j.updatedAt || null;
-                    localStorage.setItem('ultimo_tasso_3m', JSON.stringify({ value: euriborBase, date: TASSI_META.ultimoAggiornamento }));
-                    aggiornaBadgeTassi(true);
-                    return;
-                }
-            }
-        } catch (e) {
-            console.warn('Server endpoint non disponibile:', e);
-        }
-
-        // 2) Tenta ECB pubblico (potrebbe bloccare da browser)
-        try {
-            const url = 'https://data-api.ecb.europa.eu/service/data/EST/EST.B.EU000A2QQF32.CR?lastNObservations=1&format=csvdata';
-            const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-            if (!res.ok) throw new Error('ECB API ' + res.status);
-            const text = (await res.text()).trim();
-            if (/Your access has been blocked/i.test(text)) throw new Error('ECB blocked by WAF');
-            const rows = text.split('\n').filter(r => !r.startsWith('#') && r.trim().length);
-            const last = rows[rows.length - 1].split(',');
-            const time_period = last[0];           // ISO date
-            const obs_value = parseFloat(last[1]); // percentuale
-            if (Number.isNaN(obs_value)) throw new Error('Valore non numerico');
-            euriborBase = obs_value;
-            TASSI_META.fonte = 'ECB €STR 3M compounded';
-            TASSI_META.ultimoAggiornamento = time_period;
-            localStorage.setItem('ultimo_tasso_3m', JSON.stringify({ value: euriborBase, date: TASSI_META.ultimoAggiornamento }));
-            aggiornaBadgeTassi(true);
-            return;
-        } catch (e) {
-            console.warn('ECB pubblico non accessibile dal browser:', e);
-        }
-
-        // 3) Cache locale
-        try {
-            const saved = localStorage.getItem('ultimo_tasso_3m');
-            if (saved) {
-                const j = JSON.parse(saved);
-                const val = Number(j.value);
-                if (!Number.isNaN(val)) {
-                    euriborBase = val;
-                    TASSI_META.fonte = 'cache locale';
-                    TASSI_META.ultimoAggiornamento = j.date || null;
-                    aggiornaBadgeTassi(false);
-                    return;
-                }
-            }
-        } catch (e) {
-            console.warn('Cache locale non disponibile:', e);
-        }
-
-        // 4) Fallback
-        aggiornaBadgeTassi(false);
-    }
-
-    function aggiornaBadgeTassi(online) {
-        const el = document.getElementById('badge-tassi');
-        const note = document.getElementById('note-tassi');
-        if (!el) return;
-        const fonte = online ? (TASSI_META.fonte || 'fonte online') : 'fallback';
-        const when = TASSI_META.ultimoAggiornamento ? ' • agg. ' + TASSI_META.ultimoAggiornamento : '';
-        el.textContent = `Indice base: ${euriborBase.toFixed(3)}% (${fonte})${when}`;
-        if (note) {
-            if (!online) note.textContent = 'Attenzione: impossibile contattare la fonte online; uso cache o valori locali.';
-            else note.textContent = '';
-        }
-    }
-
-    function debounce(fn, ms=250){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-    // ====== FINE: Caricamento indice base + badge ======
-
 
     // ------------------ FUNZIONI UTILI ------------------
     function formatNumber(num) {
@@ -1062,21 +970,6 @@
 
     // ------------------ EVENT LISTENERS ------------------
     document.addEventListener("DOMContentLoaded", function () {
-        // Carica tasso all'avvio
-        try { caricaTassoUfficiale(); } catch(_){}
-
-        // Refresh manuale
-        const btnRefresh = document.getElementById("btnRefreshTassi");
-        if (btnRefresh) btnRefresh.addEventListener("click", async () => { await caricaTassoUfficiale(); });
-
-        // Ricalcolo live input
-        const iFido = document.getElementById("importoFido");
-        const iDurata = document.getElementById("durata");
-        const iPatr = document.getElementById("patrimonio");
-        if (iFido)  iFido.addEventListener('input', debounce(() => { try { eseguiCalcolo(); } catch(_) {} }, 300));
-        if (iDurata) iDurata.addEventListener('change', debounce(() => { try { eseguiCalcolo(); } catch(_) {} }, 300));
-        if (iPatr)  iPatr.addEventListener('input', debounce(() => { try { eseguiCalcolo(); } catch(_) {} }, 300));
-    
         // All'avvio, nascondi le sezioni dei risultati, se vuoi
         document.querySelector('.parametri').style.display = 'none';
         document.querySelector('.tabella-confronto').style.display = 'none';

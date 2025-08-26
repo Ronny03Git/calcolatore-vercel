@@ -1,19 +1,13 @@
-// api/tassi-ecb.js
 export default async function handler(req, res) {
   const tenor = (req.query.tenor || '3m').toLowerCase();
-  const map = {
-    '1m': 'EST.B.EU000A2QQF24.CR',
-    '3m': 'EST.B.EU000A2QQF32.CR',
-    '6m': 'EST.B.EU000A2QQF40.CR'
-  };
+  const map = { '1m':'EST.B.EU000A2QQF24.CR', '3m':'EST.B.EU000A2QQF32.CR', '6m':'EST.B.EU000A2QQF40.CR' };
   const series = map[tenor] || map['3m'];
 
   async function getCsv(url) {
     const r = await fetch(url, {
       headers: {
         'Accept': 'text/csv',
-        // aiuta a non essere scambiati per bot
-        'User-Agent': 'Mozilla/5.0 (compatible; CalcolatoreFido/1.0; +https://calcolatore-vercel.vercel.app/)'
+        'User-Agent': 'Mozilla/5.0 (compatible; CalcolatoreFido/1.0; +https://example.org/)'
       }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -28,12 +22,10 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1) Nuovo Data Portal
     let out;
     try {
       out = await getCsv(`https://data-api.ecb.europa.eu/service/data/EST/${series}?lastNObservations=1&format=csvdata`);
     } catch (e1) {
-      // 2) Fallback: vecchio SDW
       out = await getCsv(`https://sdw-wsrest.ecb.europa.eu/service/data/EST/${series}?lastNObservations=1&format=csvdata`);
     }
 
@@ -41,6 +33,7 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=600');
     return res.status(200).json({ tenor, value: out.value, date: out.date, source: 'ECB (server proxy)' });
   } catch (e) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(502).json({ error: String(e) });
   }
 }
